@@ -27,9 +27,16 @@ def naiveSoftmaxLossAndGradient(centerwordVector, contextwordVector,
     return loss, gradCenterWord, gradOutsideWords
 
 
-def getNegativeSamples(dataset, contextwordInd, nWords, K):
+def getNegativeSamples(dataset, contextwordInd, K):
     negSampleWordIndices = [None] * K
     for k in range(K):
+        # samples token using freq^(0.75) weighted
+        # uniform distribution.
+        # Thus, prob of each token is weighted by the
+        # freq of its occurance. 0.75 is a experimental
+        # value that is used and there is no theoretical
+        # explanation for this. GloVe and many other
+        # use x**(0.75) since it gives best results
         newidx = dataset.sampleTokenIdx()
         while newidx == contextwordInd:
             newidx = dataset.sampleTokenIdx()
@@ -42,7 +49,7 @@ def negativeSamplingLossAndGradient(centerwordVector, contextwordVector,
                                     contextwordInd, dataset, K=10):
     N = outsideWordVectors.shape[0]
     D = outsideWordVectors.shape[1]
-    negSampleWordIdxs = getNegativeSamples(dataset, contextwordInd, N, K)
+    negSampleWordIdxs = getNegativeSamples(dataset, contextwordInd, K)
 
     centerwordVector = centerwordVector.reshape((D,1))
     contextwordVector = contextwordVector.reshape((D,1))
@@ -50,16 +57,9 @@ def negativeSamplingLossAndGradient(centerwordVector, contextwordVector,
 
     loss = -np.squeeze(np.log(sigmoid(contextwordVector.T @ centerwordVector))) - np.sum(np.log(sigmoid(-negativeSamples @ centerwordVector)))
 
-    # gradCenterWord = np.squeeze(negativeSamples.T @ (1 - sigmoid(-negativeSamples @ centerwordVector))) - np.squeeze(contextwordVector @ (1 - sigmoid(contextwordVector.T @ centerwordVector)))
-    # gradOutsideWords = np.zeros((N,D), dtype=float)
-    # gradOutsideWords[contextwordInd] = np.squeeze(centerwordVector @ (sigmoid(contextwordVector.T @ centerwordVector) - 1))
-
-    gradCenterWord = (sigmoid(contextwordVector.T @ centerwordVector) - 1) * contextwordVector
-    gradCenterWord += -np.sum((sigmoid(-negativeSamples @ centerwordVector) - 1) * negativeSamples, axis=0, keepdims=True).T
-    gradCenterWord = np.squeeze(gradCenterWord)
-
+    gradCenterWord = np.squeeze(negativeSamples.T @ (1 - sigmoid(-negativeSamples @ centerwordVector))) - np.squeeze(contextwordVector @ (1 - sigmoid(contextwordVector.T @ centerwordVector)))
     gradOutsideWords = np.zeros((N,D), dtype=float)
-    gradOutsideWords[contextwordInd] += (sigmoid(contextwordVector.T @ centerwordVector).squeeze() - 1) * np.reshape(centerwordVector, (D,)) 
+    gradOutsideWords[contextwordInd] = np.squeeze(centerwordVector @ (sigmoid(contextwordVector.T @ centerwordVector) - 1))
 
     for idx in negSampleWordIdxs:
         negativeSampleVector = np.reshape(outsideWordVectors[idx], (D,1))
@@ -107,7 +107,17 @@ def word2vecSGDWrapper(model, word2Ind, wordVectors, dataset,
     outsideWordVectors = wordVectors[int(N/2):,:]
     
     for i in range(batchSize):
-        centerword, context = dataset.getRandomContext(windowSize)
+        # The random window size is a simple way to weight context
+        # words by distance. The window size is picked from uniform
+        # distribution between 1 and windowSize.
+        # The context word at distance 1 is considered every time i.e
+        # with probability 1
+        # The context word at distance 2 is considered with probability
+        # 1-(1/windowSize)
+        # This way the word at distance n is considered with probability
+        # 1-((n-1)/windowSize)
+        windowSize1 = random.randint(1, windowSize)
+        centerword, context = dataset.getRandomContext(windowSize1)
         c, gin, gout = model(centerword, context, word2Ind,
                              centerWordVectors, outsideWordVectors,
                              dataset, word2vecLossAndGradient)
@@ -116,137 +126,3 @@ def word2vecSGDWrapper(model, word2Ind, wordVectors, dataset,
         grad[int(N/2):,:] += gout / batchSize
     
     return loss, grad
-
-
-def gradcheck_naive(f, x, gradientText):
-    """ Gradient check for a function f.
-    Arguments:
-    f -- a function that takes a single argument and outputs the
-         loss and its gradients
-    x -- the point (numpy array) to check the gradient at
-    gradientText -- a string detailing some context about the gradient computation
-    """
-
-    rndstate = random.getstate()
-    random.setstate(rndstate)
-    fx, grad = f(x) # Evaluate function value at original point
-    h = 1e-4        # Do not change this!
-
-    # Iterate over all indexes ix in x to check the gradient.
-    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
-    while not it.finished:
-        ix = it.multi_index
-
-        x[ix] += h # increment by h
-        random.setstate(rndstate)
-        fxh, _ = f(x) # evalute f(x + h)
-        x[ix] -= 2 * h # restore to previous value (very important!)
-        random.setstate(rndstate)
-        fxnh, _ = f(x)
-        x[ix] += h
-        numgrad = (fxh - fxnh) / 2 / h
-
-        # Compare gradients
-        reldiff = abs(numgrad - grad[ix]) / max(1, abs(numgrad), abs(grad[ix]))
-        if reldiff > 1e-5:
-            print("Gradient check failed for %s." % gradientText)
-            print("First gradient error found at index %s in the vector of gradients" % str(ix))
-            print("Your gradient: %f \t Numerical gradient: %f" % (
-                grad[ix], numgrad))
-            return
-
-        it.iternext() # Step to next dimension
-
-    print("Gradient check passed!")
-
-
-def normalizeRows(x):
-    """ Row normalization function
-
-    Implement a function that normalizes each row of a matrix to have
-    unit length.
-    """
-    N = x.shape[0]
-    x /= np.sqrt(np.sum(x**2, axis=1)).reshape((N,1)) + 1e-30
-    return x
-
-
-def test_word2vec():
-    """ Test the two word2vec implementations, before running on Stanford Sentiment Treebank """
-    dataset = type('dummy', (), {})()
-    def dummySampleTokenIdx():
-        return random.randint(0, 4)
-
-    def getRandomContext(C):
-        tokens = ["a", "b", "c", "d", "e"]
-        return tokens[random.randint(0,4)], \
-            [tokens[random.randint(0,4)] for i in range(2*C)]
-    dataset.sampleTokenIdx = dummySampleTokenIdx
-    dataset.getRandomContext = getRandomContext
-
-    random.seed(31415)
-    np.random.seed(9265)
-    dummy_vectors = normalizeRows(np.random.randn(10,3))
-    dummy_tokens = dict([("a",0), ("b",1), ("c",2),("d",3),("e",4)])
-
-    print("==== Gradient check for skip-gram with naiveSoftmaxLossAndGradient ====")
-    gradcheck_naive(lambda vec: word2vecSGDWrapper(
-        skipgram, dummy_tokens, vec, dataset, 5, naiveSoftmaxLossAndGradient),
-        dummy_vectors, "naiveSoftmaxLossAndGradient Gradient")
-
-    print("==== Gradient check for skip-gram with negSamplingLossAndGradient ====")
-    gradcheck_naive(lambda vec: word2vecSGDWrapper(
-        skipgram, dummy_tokens, vec, dataset, 5, negativeSamplingLossAndGradient),
-        dummy_vectors, "negSamplingLossAndGradient Gradient")
-
-    print("\n=== Results ===")
-    print ("Skip-Gram with naiveSoftmaxLossAndGradient")
-
-    print ("Your Result:")
-    print("Loss: {}\nGradient wrt Center Vectors (dJ/dV):\n {}\nGradient wrt Outside Vectors (dJ/dU):\n {}\n".format(
-            *skipgram("c", ["a", "b", "e", "d", "b", "c"],
-                dummy_tokens, dummy_vectors[:5,:], dummy_vectors[5:,:], dataset, naiveSoftmaxLossAndGradient) 
-        )
-    )
-
-    print ("Expected Result: Value should approximate these:")
-    print("""Loss: 11.16610900153398
-Gradient wrt Center Vectors (dJ/dV):
- [[ 0.          0.          0.        ]
- [ 0.          0.          0.        ]
- [-1.26947339 -1.36873189  2.45158957]
- [ 0.          0.          0.        ]
- [ 0.          0.          0.        ]]
-Gradient wrt Outside Vectors (dJ/dU):
- [[-0.41045956  0.18834851  1.43272264]
- [ 0.38202831 -0.17530219 -1.33348241]
- [ 0.07009355 -0.03216399 -0.24466386]
- [ 0.09472154 -0.04346509 -0.33062865]
- [-0.13638384  0.06258276  0.47605228]]
-    """)
-
-    print ("Skip-Gram with negSamplingLossAndGradient")   
-    print ("Your Result:")
-    print("Loss: {}\nGradient wrt Center Vectors (dJ/dV):\n {}\n Gradient wrt Outside Vectors (dJ/dU):\n {}\n".format(
-        *skipgram("c", ["a", "b"], dummy_tokens, dummy_vectors[:5,:],
-            dummy_vectors[5:,:], dataset, negativeSamplingLossAndGradient)
-        )
-    )
-    print ("Expected Result: Value should approximate these:")
-    print("""Loss: 16.15119285363322
-Gradient wrt Center Vectors (dJ/dV):
- [[ 0.          0.          0.        ]
- [ 0.          0.          0.        ]
- [-4.54650789 -1.85942252  0.76397441]
- [ 0.          0.          0.        ]
- [ 0.          0.          0.        ]]
- Gradient wrt Outside Vectors (dJ/dU):
- [[-0.69148188  0.31730185  2.41364029]
- [-0.22716495  0.10423969  0.79292674]
- [-0.45528438  0.20891737  1.58918512]
- [-0.31602611  0.14501561  1.10309954]
- [-0.80620296  0.36994417  2.81407799]]
-    """)
-
-if __name__ == "__main__":
-    test_word2vec()  
