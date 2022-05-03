@@ -7,14 +7,14 @@ import glob
 
 def loadParams():
     st = 0
-    for f in glob.glob('saved_params_*.npy'):
+    for f in glob.glob('results/saved_params_*.npy'):
         iter = int(op.splitext(op.basename(f))[0].split('_')[2])
         if iter > st:
             st = iter
     
     if st > 0:
-        params_file = f'saved_params_{st}.npy'
-        state_file = f'saved_state_{st}.pickle'
+        params_file = f'results/saved_params_{st}.npy'
+        state_file = f'results/saved_state_{st}.pickle'
         params = np.load(params_file)
         with open(state_file, "rb") as f:
             state = pickle.load(f)
@@ -23,9 +23,9 @@ def loadParams():
 
 
 def saveParams(iter, params):
-    params_file = f'saved_params_{iter}.npy'
+    params_file = f'results/saved_params_{iter}.npy'
     np.save(params_file, params)
-    with open(f'saved_state_{iter}.pickle', "wb") as f:
+    with open(f'results/saved_state_{iter}.pickle', "wb") as f:
         pickle.dump(random.getstate(), f)
 
 

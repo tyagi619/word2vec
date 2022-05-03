@@ -24,3 +24,9 @@ def softmax(x):
 
 def sigmoid(x):
     return 1. / (1. + np.exp(-x))
+
+
+def normalizeRows(x):
+    N = x.shape[0]
+    x /= np.sqrt(np.sum(x**2, axis=1)).reshape((N,1)) + 1e-30
+    return x

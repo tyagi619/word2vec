@@ -3,3 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# results dir
+results/
+
+# do not upload the wikipedia dataset since it is large
+dataset/wikiBillionChars
+dataset/stanfordTreeBank
+

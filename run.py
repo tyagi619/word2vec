@@ -14,7 +14,14 @@ from sgd import sgd
 
 if __name__ == '__main__':
     random.seed(314)
-    ds = StanfordSentiment()
+    # Wikipeda first billion chracters
+    # ds = StanfordSentiment(path='dataset/wikiBillionChars', tablesize=100000000 , thresholdFactor=1e-6)
+    # iterations = 2000000
+    
+    # Stanford Sentiment Treebank
+    ds = StanfordSentiment(path='dataset/stanfordTreeBank', thresholdFactor=1e-5)
+    iterations = 40000
+    
     tokens = ds.tokens()
     nWords = len(tokens)
 
@@ -34,8 +41,10 @@ if __name__ == '__main__':
     wordVectors = sgd(
         lambda vec: word2vecSGDWrapper(skipgram, tokens, vec, ds, C,
         negativeSamplingLossAndGradient),
-        wordVectors, 0.3, 40000, None, False, PRINT_EVERY=10
+        wordVectors, 0.3, iterations, None, True, PRINT_EVERY=10
     )
+    endTime = time.time()
+    print(f' Training took {(endTime-startTime)/60} mins')
 
     wordVectors = np.concatenate(
     (wordVectors[:nWords,:], wordVectors[nWords:,:]),
@@ -61,7 +70,7 @@ if __name__ == '__main__':
     plt.xlim((np.min(coord[:,0]), np.max(coord[:,0])))
     plt.ylim((np.min(coord[:,1]), np.max(coord[:,1])))
 
-    plt.savefig('word_vectors.png')
+    plt.savefig('results/word_vectors.png')
 
 
 
